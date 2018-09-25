@@ -1,0 +1,8 @@
+r <- raster()
+r[] <- seq(1, ncell(r)) + rnorm(ncell(r), 20000, 10000)
+plot(r)
+s <- fit_trend_surface(r, np = 1)
+plot(s)
+par(mfrow = c(1,2))
+plot(r, legend = FALSE)
+plot(r - s, legend = FALSE)

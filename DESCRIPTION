@@ -1,0 +1,30 @@
+Package: rdemtools
+Type: Package
+Title: Digital elevation model editing tools
+Version: 0.0.1.9000
+Date: 2018-09-24
+Author@R: person("Gaston Mauro", "Diaz", email =
+    "gdiaz@ciefap.org.ar", role = c("aut", "cre"))
+Description: The package rdemtools offers an easy way to use the power of R to
+    edit digital elevation models.
+Depends:
+    R (>= 3.2.1),
+    raster (>= 2.4-15)
+License: GPL (>= 3)
+Author: Gaston Mauro Diaz <gdiaz@ciefap.org.ar> [aut, cre]
+Maintainer: "Gaston Mauro Diaz <gdiaz@ciefap.org.ar>
+LazyData: TRUE
+Imports:
+    raster,
+    EBImage,
+    spatial,
+    akima,
+    sp,
+    fields
+RoxygenNote: 6.1.0
+Suggests: gstat,
+    automap,
+    knitr,
+    rmarkdown
+Encoding: UTF-8
+VignetteBuilder: knitr

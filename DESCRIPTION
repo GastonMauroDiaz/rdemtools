@@ -10,6 +10,8 @@ Description: The package rdemtools offers an easy way to use the power of R to
 Depends:
     R (>= 3.2.1),
     raster (>= 2.4-15)
+URL: http://github.com/GastonMauroDiaz/rdemtools
+BugReports: http://github.com/GastonMauroDiaz/rdemtools/issues
 License: GPL (>= 3)
 Author: Gaston Mauro Diaz <gdiaz@ciefap.org.ar> [aut, cre]
 Maintainer: "Gaston Mauro Diaz <gdiaz@ciefap.org.ar>

@@ -1,51 +1,48 @@
----
-output: github_document
----
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
-
-```{r, echo = FALSE}
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>",
-  fig.path = "README-"
-)
-```
-
-# rdemtools
+rdemtools
+=========
 
 The goal of *rdemtools* is to provides functions to edit digital elevation models (**DEMs**). This package is very simple, with only a few functions and without new classes. However, it offers an easy way to use the power of R to edit DEMs.
 
-## Installation
+Installation
+------------
 
 You can install rdemtools from github with:
 
-```{r gh-installation, eval = FALSE}
+``` r
 # install.packages("devtools")
 devtools::install_github("GastonMauroDiaz/rdemtools")
 ```
 
-## Example
+Example
+-------
 
 This is a basic example which shows you how to solve a common problem:
 
-```{r include=FALSE}
-require(rdemtools)
-
-```
-
-
-```{r example}
+``` r
 set.seed(11)
 reference <- fake_dem(n_random_data = 60, z_range = c(0, 600))
+#> [using ordinary kriging]
 plot(reference)
+```
+
+![](README-example-1.png)
+
+``` r
 
 set.seed(18)
 fillSource <- fake_dem(z_range = c(0, 20))
+#> [using ordinary kriging]
 fillSource <- fillSource - mean(fillSource[])
 fillSource <- fillSource + reference
 fillSource <- smooth_dem(fillSource, theta = 6)
 plot(fillSource)
+```
+
+![](README-example-2.png)
+
+``` r
 
 p <- sampleRegular(reference, 10, sp = TRUE)
 voidsMask <- fake_voids(p, void_size = 20, reference)
@@ -53,21 +50,33 @@ voidsMask <- fake_voids(p, void_size = 20, reference)
 dem <- reference
 dem[voidsMask] <- NA
 plot(dem)
+```
+
+![](README-example-3.png)
+
+``` r
 
 slp <- terrain(fillSource, "slope")
 asp <- terrain(fillSource, "aspect")
 demF2 <- fill_voids_k08(dem, slp, asp, show_progress_bar = FALSE)
 
 plot(demF2)
-
-plot(demF2 - reference)
-
 ```
 
-## Vignette
+![](README-example-4.png)
 
-After install *rdemtool*, you can see the vignettes with: 
+``` r
 
-```{r eval=FALSE}
+plot(demF2 - reference)
+```
+
+![](README-example-5.png)
+
+Vignette
+--------
+
+After install *rdemtool*, you can see the vignettes with:
+
+``` r
 browseVignettes(package = "rdemtools")
 ```

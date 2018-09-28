@@ -1,0 +1,177 @@
+
+---
+title: "Void filling"
+author: "Gastón Mauro Díaz"
+bibliography: bibliography.bib
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    fig_width: 7
+    fig_height: 5
+vignette: >
+  %\VignetteIndexEntry{Void filling}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+## Overview
+I recommend you to start with the [Removing artifacts]() vignette of [rdemtools]() package. There, I explain the essential for working with *rdemtools*. Here, I approach a more specific problem. So, make sure you are interested in the problem before committing to read.
+
+## Problem
+Some DEMs have voids on them. The origin of these voids is related with the technology used to generate the DEM. When these voids are relatively big (the number of pixels is a good indicator of the relative size), an interpolation may produce a surface far away from reality. Sometimes, there is an alternative source of elevation data that can be used to fill these voids (i.e., a DEM of lower quality than the main DEM). Therefore, the problem is how to merge the DEM with the fill source to produce the most accurate result.
+
+## Toy dataset
+To understand the results presented here, it is important to know how the toy dataset was created. This dataset must have a DEM with voids and a fill source. Also, I thought that having the DEM without the voids could be useful to compare void filling techniques. Therefore, I produced a DEM, a mask to create voids in the DEM, and a degraded version of the DEM. Hereafter, the DEM is called **reference**, the degraded version of the reference is called **fill source**, and the DEM with voids is called **DEM**.
+
+To make the toy dataset, I used two functions: `fake_dem()`, and `fake_voids()`. First, I used `fake_dem()`.  I explain how to use this function in the [Removing artifacts]() vignette.
+
+```{r include=FALSE}
+require(rdemtools)
+```
+
+
+```{r reference_whit_fake_dem}
+r <- raster(ncol = 200, nrow = 100)
+extent(r) <- extent(0, 200, 0, 100)
+projection(r) <- projection(r) <- CRS("+init=epsg:32718")
+
+###reference
+set.seed(11)
+reference <- fake_dem(r, n_random_data = 60, z_range = c(0, 600))
+plot(reference)
+```
+
+To create the fill source, I created an error surface with values center around zero, added it to the reference, and  smoothed the result. Remember, my goal here was to create data of lower quality than the reference. 
+
+
+```{r fill_source, message=FALSE, warning=FALSE}
+set.seed(18)
+fillSource <- fake_dem(r, z_range = c(0, 20))
+fillSource <- fillSource - mean(fillSource[])
+fillSource <- fillSource + reference
+fillSource <- smooth_dem(fillSource, theta = 6)
+plot(fillSource)
+```
+
+More than one fill source can be used. To show this, I duplicated the fill source and modified both versions, degrading, even more, the upper half part in the first version and the bottom half part in the second version.
+
+```{r}
+upperHalfCells <- 1:(ncell(r)/2)
+fillSource1 <- fillSource
+fillSource1[upperHalfCells] <- (fillSource * 2)[upperHalfCells]
+fillSource2 <- fillSource * 2
+fillSource2[upperHalfCells] <- fillSource[upperHalfCells]
+```
+
+To create the DEM, I needed to make voids in the reference. So, I generated a mask using `fake_voids()`. This function requires a `SpatialPoints` object. With it, you can tell the function where you want the voids. The method `sampleRegular()` from *raster* package is excellent for making a `SpatialPoints` in this context. The other arguments of `fake_voids()` are `void_size`, `is_circular`, and `y`. The latter is passed to the function rasterize from raster package. So, `y` should be the DEM in which the voids must be created; `void_size` should be used to indicate the size of the voids; and `isCicular = TRUE` must be used only if circular voids are required. I created two types of voids, small and big.  I explain the reason for that in the next paragraph.
+
+
+```{r voidsMask}
+p <- sampleRegular(reference, 10, sp = TRUE)
+bigVoidsMask <- fake_voids(p, void_size = 20, reference)
+p <- sampleRandom(reference, 10, sp = TRUE)
+set.seed(1)
+smallVoidsMask <- fake_voids(p, void_size = 3, reference, is_circular = TRUE)
+voidsMask <- bigVoidsMask + smallVoidsMask
+voidsMask <- voidsMask != 0
+```
+
+```{r dem_with_voidsMask}
+dem <- reference
+dem[voidsMask] <- NA
+plot(dem)
+```
+
+
+## Voids classification
+The first thing to do is know which voids can be interpolated without producing too many errors. Remember, it is a good practice to interpolate the small voids. The function `filter_voids()` is an easy way to find them. It use the number of pixels to measure the void relative size. A threshold value, the argument `thr_size_in_pixels`, should be provided to separate the small voids from the non-small voids.  I think that a `thr_size_in_pixels` of 50 is a good choice (the default value). 
+
+```{r}
+forInterpolating <- filter_voids(voidsMask)
+dem[forInterpolating] <- -150
+```
+
+To know how to interpolate using *rdemtools*, please read the [Removing artifacts]() vignette. In the present vignette, I am just going to restore the original values from the reference.
+
+```{r}
+dem[forInterpolating] <- reference[forInterpolating]
+```
+
+
+
+
+## Filling voids without modifying the fill source
+To fill the voids with the fill source, the simplest option is to use the `cover()` from the *raster* package. The result was pretty bad, as expected, but it helps to contextualize the other techniques.
+
+```{r}
+demF0 <- cover(dem, fillSource1)
+plot(demF0)
+hs <- hillShade(terrain(demF0, "slope"), terrain(demF0, "aspect"))
+plot(hs , col= grey((0:255)/255), legend = FALSE)
+```
+
+
+## Filling voids modifying the best available fill source
+For an overview of the techniques traditionally used for void filling, see @Grohman2006d. One of this technique is called delta surface fill (DSF). The function `fill_voids_g06()` could be considered as an improved version of DSF. For more details see the function documentation (`?fill_voids_g06`). Here, I am going to demonstrate how to use the  function. I recommend you to use the default arguments. This way, you only need to provide the data. The function expects a `RasterStack`, with the DEM with voids in the first layer and the available fill sources in the next layers. I made a RasterStack with the DEM and both fill sources using `stack()` from *raster* package. One advantage of `fill_voids_g06()` is that it can select the best fill source for each void. The output has a second layer with metadata information about what fill source was used for each void.
+
+```{r}
+demF1 <- fill_voids_g06(stack(dem, fillSource1, fillSource2), show_progress_bar = FALSE)
+plot(subset(demF1, 1))
+plot(subset(demF1, 2))
+
+hs <-
+  hillShade(terrain(subset(demF1, 1), "slope"), 
+            terrain(subset(demF1, 1), "aspect"))
+plot(hs , col = grey((0:255) / 255), legend = FALSE)
+```
+
+
+## Filling voids using the technique of @Karkee2008
+@Karkee2008 developed a method that uses derivatives calculated from the fill source. I implemented this technique in the function `fill_voids_k08()`. For more details, please see the function documentation (`?fill_voids_k08`). As `fill_voids_g06()`, this function is easy to use. However, it cannot handle more than one fill source. Therefore, I used the metadata outputted by `fill_voids_g06()` to combine the fill sources.
+
+```{r}
+m <- subset(demF1, 2)
+m <- m == 1
+m[is.na(m)] <- 0
+
+im <- imager::as.cimg(as.matrix(m))
+im <- imager::dilate_square(im, 5)
+values(m) <- as.matrix(im)
+
+fillSource2[m] <- NA
+fillSource <- cover(fillSource2, fillSource1)
+```
+
+Once the fill source was ready, I calculated the derivatives and called `fill_voids_k08()`.
+
+```{r}
+slp <- terrain(fillSource, "slope")
+asp <- terrain(fillSource, "aspect")
+demF2 <- fill_voids_k08(dem, slp, asp, show_progress_bar = FALSE)
+
+hs <- hillShade(terrain(demF2, "slope"), terrain(demF2, "aspect"))
+plot(hs , col= grey((0:255)/255), legend = FALSE)
+```
+
+## Accuracy assessment
+Having the reference allows me to calculate the error surface for each technique.
+
+```{r}
+plot(reference - subset(demF1, 1))
+plot(reference - subset(demF2, 1))
+```
+
+I think that the combination of `fill_voids_g06()` and `fill_voids_k08()` is the best choice. If this was more than a demonstration, I would try to improve the result by using `mask_artifacts()` as I described in the vignette mentioned in the overview.
+
+# References
+

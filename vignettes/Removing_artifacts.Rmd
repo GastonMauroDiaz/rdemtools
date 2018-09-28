@@ -1,0 +1,198 @@
+
+---
+title: "Removing artifacts"
+author: "Gastón Mauro Díaz"
+bibliography: bibliography.bib
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    fig_width: 7
+    fig_height: 5
+vignette: >
+  %\VignetteIndexEntry{Removing artifacts}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+## Overview
+The package [rdemtools]() provides functions to edit digital elevation models (DEMs). You can combine these functions and design processing pipelines for solving specific problems. This vignette goes from the problem to the solution, demonstrating what each function does and how they can be combined. I assume that you have experience using the raster package. If not, before reading this vignette, you should read [Introduction to the raster package](https://cran.r-project.org/web/packages/raster/vignettes/Raster.pdf), and practice to gain some familiarity with that package.
+
+The package *rdemtools* is very simple, with only a few functions and without new classes. However, it offers an easy way to use the power of *R* to edit DEMs.
+
+## Problem
+DEMs contain errors, such as shapes visually recognized as unlikely features for the terrain that is represented. This type of errors is usually called “artifacts” [@Hengl2009]. Automatic recognition of artifacts could be used to find these errors and delete them. However, removing the artifacts produce another problem: data voids. Usually, a complete cover of elevation data is required for tasks like hydrological modeling and orthorectification of remote sensing data. If the voids are relatively small, an interpolation could solve this issue. Otherwise, depending on the availability of another data source of lower but still reliable quality, a void filling algorithm can be used. In this vignette, I am going to demonstrate how to solve the first case, when interpolation is the right choice. I cover the second case in this vignette: [Void filling]().
+
+## Data
+The package has the data sample "Huemules Unit”, which is a DEM produced with unmanned aerial photogrammetry. However, this single dem is not enough for testing all the functions. On the other hand, adding more DEMs will make the package heavier. So, I programmed the function `fake_dem()`, which is probably not of great interest if you are an average user but is great for testing. The function `fake_dem()` helped me to use the variogram extracted from “Huemules Unit” to interpolate randomly generated data. Now, if you are not interested in generating your own toy data, you can jump to the next section.
+
+With `fake_dem()` you can generate DEMs of any size, but generating a big DEM demands a lot of computer time. Indeed, it is better to generate several DEMs of small size than a single big DEM. The size of the DEM is controlled with the argument `r`, which is a *RasterLayer*. You can create a *RasterLayer* of any size using  `raster()` from *raster* package:
+
+
+```{r include=FALSE}
+require(rdemtools)
+```
+
+
+```{r raster demo}
+rSmall <- raster(ncol = 100, nrow = 100)
+projection(rSmall ) <- NA
+extent(rSmall ) <- extent(0, 100, 0, 100)
+ncell(rSmall)
+rBig <- raster(ncol = 400, nrow = 400)
+projection(rBig ) <- NA
+extent(rBig ) <- extent(0, 400, 0, 400)
+ncell(rBig)
+```
+
+Remember, at the end, `fake_dem()` performs an ordinary kriging interpolation, so a variogram must be calculated and it is your job to provide the data. The argument `true_dem` is the data used for variogram fitting. Using random data for this task is not a very good idea because an spatial structure is needed to fit a nice variogram. The easiest solution is to extract the data from any real DEM. By default, “Huemules Unit” DEM is used but you can provide your own DEM. You can control the range of elevation with the argument `z_range`. With argument `n_random_data`, you can control the number of random data that is generated. However, the random number generator state makes all the difference. You should play around with `set.seed()`, `z_range`, and `n_random_data`. This is the code I used to generate the toy data for this vignette:
+
+```{r}
+r <- raster(ncol = 200, nrow = 100)
+projection(r) <- NA
+extent(r) <- extent(0, 200, 0, 100)
+
+set.seed(11)
+dem <- fake_dem(r, n_random_data = ncell(r) * 0.01, z_range = c(0, 500))
+```
+
+As the visualization of the DEM shows, there are sinkholes and spikes on the otherwise smooth surface. Those are the artifacts that I found in this DEM. The methods used to visualize the DEM are from the *sp* and the *raster* packages.
+
+```{r}
+plot(dem, col= grey((0:255)/255))
+projection(dem) <- CRS("+init=epsg:32718") # I provide an arbitrary CRS to use terrain
+hs <- hillShade(terrain(dem, "slope"), terrain(dem, "aspect"))
+plot(hs , col= grey((0:255)/255), legend = FALSE)
+```
+
+
+## Mask the artifacts
+Looking for some technique to automatically recognize artifacts, I found a very simple algorithm described in the textbook by @Hengl2009. It was also very simple to implement and it has given me good results so far.
+
+
+```{r}
+m <- mask_artifacts(dem, kernel_sizes  = c(5, 7), times_sd = 2)
+plot(m, legend = FALSE)
+```
+
+
+## Delete the artifacts
+In cases like the one treated here, some corrupted values usually remain unmasked near the border of the masked artifacts. To put these corrupted data under the mask, a dilation operation is a good choice. With this well-known method, it is possible to expand the mask and cover the corrupted data. The *imager* package can do this task, the trick is to use `as.matrix()` to solve the interoperability between *RasterLayer* and *cimg*. The latter is the class used by *imager* to represent an image.
+
+```{r dilate}
+im <- imager::as.cimg(as.matrix(m))
+im <- imager::dilate_square(im, 3)
+values(m) <- as.matrix(im)
+plot(m, legend = FALSE)
+```
+
+I assigned `0` to the `NA` values that `mask_artifacts()` created in the margins as a side effect. Therefore, if there are artifacts in the margins, they will remain unmasked.
+
+```{r}
+m[is.na(m)] <- 0
+plot(m, legend = FALSE)
+```
+
+Finally, I used `m` to delete the artifacts and create the voids.
+
+```{r}
+dem[m] <- NA
+plot(dem, legend = FALSE)
+```
+
+
+## Interpolate into data voids
+
+`interpolate_akima()` is a wrapper for `interp()` from the *akima* package. The advantage of my function is that it returns a *RasterLayer*, and that each void is interpolated separately, which increase processing speed.
+
+```{r warning=FALSE}
+dem_int <- interpolate_akima(dem, linear = TRUE)
+dem_int <- subset(dem_int, 1)
+hs <-
+  hillShade(terrain(dem_int, "slope"), terrain(dem_int, "aspect"))
+plot(hs , col = grey((0:255) / 255), legend = FALSE)
+```
+
+
+The result was pretty good but some artifacts were still there. So, I tried again. This time, I encapsulated the code in a temporary function ---`fix_artifacts()`.
+
+```{r message=FALSE, warning=FALSE}
+
+fix_artifacts <- function(dem) {
+  # Masking
+  m <- mask_artifacts(dem, c(5, 7), 2)
+  # Eroding
+  im <- imager::as.cimg(as.matrix(m))
+  im <- imager::dilate_square(im, 5)
+  values(m) <- as.matrix(im)
+  m[is.na(m)] <- 0
+  # Interpolate
+  dem[m] <- NA
+  dem_int <- interpolate_akima(dem, TRUE)
+  dem_int <- raster::subset(dem_int, 1)
+  dem_int
+}
+
+dem_int <- fix_artifacts(dem_int)
+hs <-
+  hillShade(terrain(dem_int, "slope"), terrain(dem_int, "aspect"))
+plot(hs , col = grey((0:255) / 255), legend = FALSE)
+```
+
+
+## Smooth the result
+The *raster* package has `focal()`, which can be easily used for spatial filtering with moving windows. For example:
+
+```{r}
+dem_smoothed <- focal(dem_int, matrix(1/9, 3, 3))
+hs <-
+  hillShade(terrain(dem_smoothed, "slope"), terrain(dem_smoothed, "aspect"))
+plot(hs , col = grey((0:255) / 255), legend = FALSE)
+```
+
+Looking for better results, I found the `image.smooth()` function from *fields* package, and I have used it several times with excellent results. Over time, I transformed the script into the function `smooth_dem()` that I include in *rdemtools*. This function is a thin wrapper for `image.smooth()`. The advantage is that users do not need to worry about data format and georeferencing. 
+
+Understanding what `image.smooth()` does is challenging, the number of arguments can be overwhelming. I always vary `theta` until I find a satisfactory result, which, for me, is when I can still see some evidence of the features that I want to filter out.
+
+
+```{r warning=FALSE}
+dem_smoothed <- smooth_dem(dem_int, theta = 1.5)
+hs <-
+  hillShade(terrain(dem_smoothed, "slope"), terrain(dem_smoothed, "aspect"))
+plot(hs , col = grey((0:255) / 255), legend = FALSE)
+
+```
+
+## Iterate over tiles
+The processing pipeline described so far may work great for a small subset of a big DEM but could fail for the whole DEM. A reason for this kind of fail could be that functions like `interpolate_akima()` and `smooth_dem()` need to load all the data into memory. That is why I programmed `iterate_over_tiles()`, so  you can run the same process but by iterating over tiles instead of  having to input all the data at once. The process could take some time but it is not going to collapse your computer if you use relatively small tiles. The size of the tiles is controlled with the argument `tile_size`. The argument `overlapping_percentage` is useful when the results have bad quality in the margins, as happen in the example.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fix_artifacts_and_smooth <- function(dem) {
+  dem <-fix_artifacts(fix_artifacts(dem))
+  # Smoothing
+  dem_smoothed <- smooth_dem(dem_int, theta = 2)
+}
+
+dem_smoothed <-
+  iterate_over_tiles(
+  dem,
+  fix_artifacts_and_smooth,
+  tile_size = 40,
+  overlapping_percentage = 20,
+  show_progress_bar = FALSE
+  )
+  hs <-
+  hillShade(terrain(dem_smoothed, "slope"),
+  terrain(dem_smoothed, "aspect"))
+  plot(hs , col = grey((0:255) / 255), legend = FALSE)
+```
+
+# References
+

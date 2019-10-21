@@ -75,7 +75,7 @@ plot(demF2 - reference)
 Vignette
 --------
 
-After install *rdemtool*, you can see the vignettes with:
+After install *rdemtools*, you can see the vignettes with:
 
 ``` r
 browseVignettes(package = "rdemtools")

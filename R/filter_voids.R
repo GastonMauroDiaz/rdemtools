@@ -1,6 +1,6 @@
 #' Filter objects by size
 #'
-#' @param x \code{\linkS4class{RasterLayer}}. Binary image.
+#' @param x \code{\linkS4class{RasterLayer}}. Binary image. Voids equal 0, data equal 1.
 #' @param thr_size_in_pixels numeric. Threshold value, an object size in pixels.
 #' @param smallers_stay logical
 #'

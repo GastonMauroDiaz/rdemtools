@@ -37,7 +37,7 @@ fill_voids_g06 <- function (x, np = 3, show_progress_bar = TRUE) {
     out  <- raster::subset(x, 1)
     meta <- raster(x)
     values(meta) <- NA
-    kern = EBImage::makeBrush(3, shape = "box")
+    kern <- EBImage::makeBrush(3, shape = "box")
 
     m <- raster::as.matrix(raster::subset(is.na(out), 1))
     m <- EBImage::bwlabel(m)
@@ -45,6 +45,9 @@ fill_voids_g06 <- function (x, np = 3, show_progress_bar = TRUE) {
     if (show_progress_bar) pb <- pbCreate(max(m), progress="text")
 
     for (i in seq(length = max(m))){
+      #print(i)
+      #if (i == 369) browser()
+      
       if (show_progress_bar) pbStep(pb, i)
       r <- raster(m)
       extent(r) <- extent(x)
@@ -53,11 +56,39 @@ fill_voids_g06 <- function (x, np = 3, show_progress_bar = TRUE) {
       r <- r / i
       rc <- r[r == 1, drop = FALSE]
       xc <- crop(x, extent(rc) * 2)
+      extended_rc <- extend(rc, extent(rc) * 2)
+      extended_rc <- is.na(extended_rc)
 
-      diff <- raster::subset(xc, subset=seq(from = 2, to = nlayers(xc))) -
-        raster::subset(xc, 1)
+      indices <- seq(from = 2, to = nlayers(xc))
+      diff <- raster::subset(xc, subset=indices) -
+              raster::subset(xc, 1)
+      calc_diff <- function(index) {
+        raster::subset(xc, subset=index) - raster::subset(xc, 1)
+      }
+      diff <- Map(calc_diff, indices)
+      
+      #indices <- unlist(Map(function(x) all(is.na(x[])), diff))
 
-      if (ncol(diff) > 20 & nrow(diff) > 20) {
+      no_of <- function(x){
+          x[extended_rc] <- NA
+          freq(is.na(x), value = 0)
+        }
+      no_of <- Map(no_of, diff)
+      no_of <- unlist(no_of)
+
+      indices <- no_of > 20 
+      indices <- seq_along(diff)[indices]
+      
+      unlock <- FALSE
+      diff <- stack(diff)
+      if (any(indices) & ncol(diff) > 20 & nrow(diff) > 20) {
+        unlock <- TRUE
+        diff <- raster::subset(diff, subset=indices)
+        xc <- raster::subset(xc, subset=indices + 1)
+      }
+
+      if (unlock) {
+
         trend <- fit_trend_surface(diff, size = ncell(diff), np)
 
         correctedDiff <- diff + trend
